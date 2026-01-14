@@ -1,6 +1,7 @@
 package extproc
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/config"
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/headers"
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/observability/logging"
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/observability/metrics"
@@ -136,15 +138,74 @@ func (r *OpenAIRouter) handleModelRouting(openAIRequest *openai.ChatCompletionNe
 
 	isAutoModel := r.Config != nil && r.Config.IsAutoModelName(originalModel)
 
+	targetModel := originalModel
 	if isAutoModel && selectedModel != "" {
-		return r.handleAutoModelRouting(openAIRequest, originalModel, decisionName, reasoningDecision, selectedModel, ctx, response)
-	} else if !isAutoModel {
-		return r.handleSpecifiedModelRouting(openAIRequest, originalModel, ctx)
+		targetModel = selectedModel
 	}
 
-	// No routing needed, return default response
-	ctx.RequestModel = originalModel
-	return response, nil
+	// Anthropic model routing
+	if r.Config.GetModelAPIFormat(targetModel) == config.APIFormatAnthropic {
+		return r.handleAnthropicRouting(openAIRequest, originalModel, targetModel, decisionName, ctx)
+	}
+
+	// OpenAI-compatible routing
+	switch {
+	case !isAutoModel:
+		return r.handleSpecifiedModelRouting(openAIRequest, originalModel, ctx)
+	case selectedModel != "":
+		return r.handleAutoModelRouting(openAIRequest, originalModel, decisionName, reasoningDecision, selectedModel, ctx, response)
+	default:
+		// Auto model without selection - no routing needed
+		ctx.RequestModel = originalModel
+		return response, nil
+	}
+}
+
+// handleAnthropicRouting handles routing to Anthropic Claude API
+// Makes a direct API call and returns an immediate response
+func (r *OpenAIRouter) handleAnthropicRouting(openAIRequest *openai.ChatCompletionNewParams, originalModel string, targetModel string, decisionName string, ctx *RequestContext) (*ext_proc.ProcessingResponse, error) {
+	logging.Infof("Routing to Anthropic API for model: %s (original: %s)", targetModel, originalModel)
+
+	// Get or create Anthropic client for this model
+	client, err := r.getAnthropicClient(targetModel)
+	if err != nil {
+		logging.Errorf("Failed to get Anthropic client: %v", err)
+		return r.createErrorResponse(500, fmt.Sprintf("Anthropic client error: %v", err)), nil
+	}
+
+	// Update model in request to target model
+	openAIRequest.Model = targetModel
+
+	// Record start time for latency tracking
+	startTime := time.Now()
+
+	// Make the API call with a timeout context
+	apiCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	responseBody, err := client.ChatCompletion(apiCtx, openAIRequest)
+	if err != nil {
+		logging.Errorf("Anthropic API call failed: %v", err)
+		metrics.RecordRequestError(targetModel, "anthropic_api_error")
+		return r.createErrorResponse(502, fmt.Sprintf("Anthropic API error: %v", err)), nil
+	}
+
+	// Record latency
+	latency := time.Since(startTime)
+	logging.Infof("Anthropic API call completed in %v for model %s", latency, targetModel)
+
+	// Track VSR decision information
+	ctx.RequestModel = targetModel
+	ctx.VSRSelectedModel = targetModel
+	if decisionName != "" {
+		ctx.VSRSelectedDecision = r.Config.GetDecisionByName(decisionName)
+	}
+
+	// Record routing latency
+	r.recordRoutingLatency(ctx)
+
+	// Return immediate response with Anthropic's response converted to OpenAI format
+	return r.createJSONResponseWithBody(200, responseBody), nil
 }
 
 // handleAutoModelRouting handles routing for auto model selection

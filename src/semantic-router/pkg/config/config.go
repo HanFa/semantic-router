@@ -35,6 +35,14 @@ const (
 	SignalTypePreference   = "preference"
 )
 
+// API format constants for model backends
+const (
+	// APIFormatOpenAI is the default OpenAI-compatible API format (used by vLLM, etc.)
+	APIFormatOpenAI = "openai"
+	// APIFormatAnthropic is the Anthropic Messages API format (used by Claude models)
+	APIFormatAnthropic = "anthropic"
+)
+
 // RouterConfig represents the main configuration for the LLM Router
 type RouterConfig struct {
 	// ConfigSource specifies where to load dynamic configuration from (file or kubernetes)
@@ -702,6 +710,11 @@ type ModelParams struct {
 	// Access key for authentication with the model endpoint
 	// When set, router will add "Authorization: Bearer {access_key}" header to requests
 	AccessKey string `yaml:"access_key,omitempty"`
+
+	// APIFormat specifies the API format for this model: "openai" (default) or "anthropic"
+	// When set to "anthropic", the router will translate OpenAI-format requests to Anthropic
+	// Messages API format and convert responses back to OpenAI format
+	APIFormat string `yaml:"api_format,omitempty"`
 }
 
 // LoRAAdapter represents a LoRA adapter configuration for a model

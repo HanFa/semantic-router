@@ -9,6 +9,7 @@ import (
 	typev3 "github.com/envoyproxy/go-control-plane/envoy/type/v3"
 
 	candle_binding "github.com/vllm-project/semantic-router/candle-binding"
+	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/anthropic"
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/cache"
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/classification"
 	"github.com/vllm-project/semantic-router/src/semantic-router/pkg/config"
@@ -28,6 +29,7 @@ type OpenAIRouter struct {
 	Cache                cache.CacheBackend
 	ToolsDatabase        *tools.ToolsDatabase
 	ResponseAPIFilter    *ResponseAPIFilter
+	anthropicClients     map[string]*anthropic.Client // Lazily initialized per-model Anthropic clients
 }
 
 // Ensure OpenAIRouter implements the ext_proc calls
@@ -293,4 +295,31 @@ func (r *OpenAIRouter) LoadToolsDatabase() error {
 
 	logging.Infof("Tools database loaded successfully from: %s", r.Config.Tools.ToolsDBPath)
 	return nil
+}
+
+// getAnthropicClient returns an Anthropic client for the given model, creating it lazily if needed.
+// The client is cached per model to reuse connections.
+func (r *OpenAIRouter) getAnthropicClient(modelName string) (*anthropic.Client, error) {
+	// Initialize the map if needed
+	if r.anthropicClients == nil {
+		r.anthropicClients = make(map[string]*anthropic.Client)
+	}
+
+	// Return cached client if exists
+	if client, ok := r.anthropicClients[modelName]; ok {
+		return client, nil
+	}
+
+	// Get API key from model config
+	apiKey := r.Config.GetModelAccessKey(modelName)
+	if apiKey == "" {
+		return nil, fmt.Errorf("no access_key configured for Anthropic model %s", modelName)
+	}
+
+	// Create new client
+	client := anthropic.NewClient(apiKey)
+	r.anthropicClients[modelName] = client
+
+	logging.Infof("Created Anthropic client for model: %s", modelName)
+	return client, nil
 }
