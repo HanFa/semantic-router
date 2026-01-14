@@ -33,3 +33,7 @@ LOG_PREFIX_ACCESS = "[access_logs]"
 # File descriptor limits
 DEFAULT_NOFILE_LIMIT = 65536
 MIN_NOFILE_LIMIT = 8192
+
+# API-based model formats (requests go directly from router to API, not through Envoy)
+# These models don't require vLLM endpoints
+API_BASED_MODEL_FORMATS = ["anthropic"]

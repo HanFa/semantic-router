@@ -3,6 +3,7 @@
 from typing import Dict, Any, List
 from cli.models import UserConfig
 from cli.utils import getLogger
+from cli.consts import API_BASED_MODEL_FORMATS
 
 log = getLogger(__name__)
 
@@ -165,7 +166,17 @@ def validate_merged_config(merged_config: Dict[str, Any]) -> List[ValidationErro
     # Validate endpoints
     if "vllm_endpoints" in merged_config:
         endpoints = merged_config["vllm_endpoints"]
-        if not endpoints:
+
+        # Check if all models use API-based backends (no vLLM endpoints needed)
+        all_api_based = False
+        if "model_config" in merged_config and merged_config["model_config"]:
+            all_api_based = all(
+                model_cfg.get("api_format") in API_BASED_MODEL_FORMATS
+                for model_cfg in merged_config["model_config"].values()
+                if isinstance(model_cfg, dict)
+            )
+
+        if not endpoints and not all_api_based:
             errors.append(
                 ValidationError("No vLLM endpoints configured", field="vllm_endpoints")
             )

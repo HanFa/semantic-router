@@ -8,6 +8,7 @@ from typing import Dict, Any, Optional
 from jinja2 import Environment, FileSystemLoader
 from cli.utils import getLogger
 from cli.models import UserConfig
+from cli.consts import API_BASED_MODEL_FORMATS
 
 log = getLogger(__name__)
 
@@ -87,6 +88,13 @@ def generate_envoy_config_from_user_config(
     # Group endpoints by model for cluster creation
     models = []
     for model in user_config.providers.models:
+        # Skip API-based models - requests go directly from router to the API
+        if model.api_format and model.api_format in API_BASED_MODEL_FORMATS:
+            log.info(
+                f"  Skipping API-based model: {model.name} (api_format={model.api_format})"
+            )
+            continue
+
         endpoints = []
         has_https = False
         uses_dns = False

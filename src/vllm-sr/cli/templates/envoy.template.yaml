@@ -115,6 +115,24 @@ static_resources:
                 address: 127.0.0.1
                 port_value: {{ extproc_port }}
 
+  {% if not models %}
+  # Fallback cluster for API-only configs (not actually used, but required for valid Envoy config)
+  # When all models are API-based, the router handles requests directly without routing through Envoy clusters
+  - name: vllm_static_cluster
+    connect_timeout: 30s
+    type: STATIC
+    lb_policy: ROUND_ROBIN
+    load_assignment:
+      cluster_name: vllm_static_cluster
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: 127.0.0.1
+                port_value: 8080
+  {% endif %}
+
   {% for model in models %}
   # Cluster for model: {{ model.name }}
   - name: {{ model.cluster_name }}_cluster
